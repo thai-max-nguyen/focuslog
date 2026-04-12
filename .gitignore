@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+venv/
+.env
+*.egg-info/
+dist/
+build/
+
+# Data (never commit user data)
+data/
+*.db
+
+# Node
+dashboard/node_modules/
+dashboard/.vite/
+
+# macOS
+.DS_Store
+
+# IDE
+.vscode/
+.idea/
