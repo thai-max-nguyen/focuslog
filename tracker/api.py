@@ -98,6 +98,23 @@ def create_app(db: Database) -> FastAPI:
         db.delete_rule(rule_id)
         return {"deleted": rule_id}
 
+    @app.get("/api/weekly")
+    def get_weekly():
+        from datetime import datetime, timedelta, timezone
+        results = []
+        today = datetime.now(timezone.utc).date()
+        for i in range(6, -1, -1):
+            d = today - timedelta(days=i)
+            date_str = d.strftime("%Y-%m-%d")
+            sessions = db.get_sessions_by_date(date_str)
+            summary = compute_daily_summary(sessions)
+            results.append({
+                "date": date_str,
+                "day": d.strftime("%a"),
+                **summary
+            })
+        return results
+
     # Serve pre-built React dashboard
     dist_path = os.path.join(os.path.dirname(__file__), "..", "dashboard", "dist")
     if os.path.exists(dist_path):
