@@ -1,4 +1,3 @@
-import pytest
 from tracker.analytics import compute_daily_summary
 
 

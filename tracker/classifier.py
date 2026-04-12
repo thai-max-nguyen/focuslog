@@ -1,5 +1,3 @@
-from typing import Optional
-
 
 DEFAULT_RULES = [
     {"app_name": "Code", "url_contains": None, "category": "Work"},
