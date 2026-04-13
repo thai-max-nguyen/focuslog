@@ -20,26 +20,27 @@ export default function TopBar({ date, onDateChange, onRefresh }: {
   const label = isToday ? 'Today' : format(d, 'MMM d, yyyy')
   const [intervalSecs, setIntervalSecs] = useState(0)
   const [spinning, setSpinning] = useState(false)
-  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const spinTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const onRefreshRef = useRef(onRefresh)
   onRefreshRef.current = onRefresh
 
-  const handleRefresh = () => {
+  const triggerRefresh = () => {
+    if (spinTimerRef.current) clearTimeout(spinTimerRef.current)
     setSpinning(true)
     onRefreshRef.current()
-    setTimeout(() => setSpinning(false), 600)
+    spinTimerRef.current = setTimeout(() => setSpinning(false), 600)
   }
 
   useEffect(() => {
-    if (timerRef.current) clearInterval(timerRef.current)
+    if (intervalRef.current) clearInterval(intervalRef.current)
     if (intervalSecs > 0) {
-      timerRef.current = setInterval(() => {
-        setSpinning(true)
-        onRefreshRef.current()
-        setTimeout(() => setSpinning(false), 600)
-      }, intervalSecs * 1000)
+      intervalRef.current = setInterval(triggerRefresh, intervalSecs * 1000)
     }
-    return () => { if (timerRef.current) clearInterval(timerRef.current) }
+    return () => {
+      if (intervalRef.current) clearInterval(intervalRef.current)
+      if (spinTimerRef.current) clearTimeout(spinTimerRef.current)
+    }
   }, [intervalSecs])
 
   return (
@@ -64,7 +65,7 @@ export default function TopBar({ date, onDateChange, onRefresh }: {
           </select>
         </div>
         <button
-          onClick={handleRefresh}
+          onClick={triggerRefresh}
           title="Refresh data"
           style={{ ...ghostBtn, display: 'flex', alignItems: 'center', gap: 6, padding: '7px 12px', background: '#0e0e0e', borderRadius: 8 }}
         >
