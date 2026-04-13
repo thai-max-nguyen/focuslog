@@ -53,25 +53,54 @@ CREATE INDEX IF NOT EXISTS idx_tags_label   ON session_tags(task_label);
 
 One tag per session. If user re-tags a session, the existing row is updated (upsert on session_id).
 
+### New table: `tag_skips`
+
+```sql
+CREATE TABLE IF NOT EXISTS tag_skips (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id  INTEGER NOT NULL REFERENCES sessions(id),
+    skipped_at  INTEGER NOT NULL
+);
+```
+
+Used for future trigger/suggestion tuning. Never shown in the dashboard UI.
+
 ---
 
 ## 4. Tagging Popup
 
 ### 4.1 Trigger Logic
 
-Show popup when **both** conditions are true:
-- Session duration >= 7 minutes (skip micro-sessions)
+Show popup on session end when **both** conditions are true:
 - Session has no existing tag
+- Duration meets threshold (either condition):
+  - `duration >= 7 minutes` — always trigger
+  - `duration >= 3 minutes AND previous session was same app` — user is focused, short sessions still matter
+
+The 3-minute relaxed threshold catches meaningful short bursts (e.g., a quick Jira ticket check before a Figma review) that the 7-minute rule would silently skip.
 
 Trigger timing:
-- **On session end only** (app switch or idle). Sessions are written to the DB when they end, so the session_id is available at trigger time. Mid-session triggering is deferred to Phase 2 (requires tracking in-progress sessions before DB insertion).
+- **On session end only** (app switch or idle). Sessions are written to the DB when they end, so the session_id is available at trigger time. Mid-session triggering is deferred to Phase 2.
 
 **Do NOT trigger when:**
-- Session duration < 7 min
+- Duration < 3 minutes
 - Session is already tagged
 - A popup is already open (deduplicate by session_id)
-- User has skipped > 3 consecutive popups in the last hour (back-off: skip next 3 sessions)
+- Last popup was shown < 20 minutes ago (cooldown — see §4.1a)
 - FocusLog has been running < 60 seconds (startup grace period)
+
+### 4.1a Cooldown Logic
+
+Minimum 20 minutes between any two tagging prompts, regardless of how many sessions end in that window. This prevents notification fatigue — if the user is switching apps rapidly, they should not be interrupted repeatedly.
+
+Cooldown escalation on skip:
+- Base cooldown: 20 min
+- After 1 skip: 30 min
+- After 2 consecutive skips: 45 min
+- After 3+ consecutive skips: 60 min
+- Cooldown resets when user successfully tags a session
+
+Cooldown state is tracked in memory only (resets on FocusLog restart). It is not persisted — the goal is session-level comfort, not long-term suppression.
 
 ### 4.2 Popup Delivery
 
@@ -112,7 +141,7 @@ This works in all browsers without native dependencies.
 |--------|--------|
 | Click suggestion pill | POST tag (source=suggested), close window |
 | Type + Enter | POST tag (source=user), close window |
-| Click × or Skip | Record skip, close window (no tag saved) |
+| Click × or Skip | Record skip (POST /api/tag-skip), close window |
 | Press Escape | Same as Skip |
 
 Auto-close after successful save — no confirmation screen.
@@ -134,15 +163,22 @@ App name: use the resolved `app_name` from the session (already human-readable: 
 
 ### 5.1 Algorithm (no ML, keyword matching only)
 
-For a given `(app_name, window_title)`:
+For a given `(app_name, window_title)`, evaluate sources in priority order and merge results:
 
-**Source 1 — Past tags for same app** (recency-weighted)
-Query last 30 days of tags where `session.app_name = current_app_name`. Sort by frequency × recency. Take top 3.
+**Source 1 — Recent tags (last 3–5 sessions) [HIGHEST PRIORITY]**
+Query the 5 most recent tagged sessions regardless of app. Return their task_labels as-is.
+*Why:* Users frequently work on the same task across multiple consecutive sessions (e.g., reviewing Jira, switching to Figma, back to Jira — all "NFC review"). Recency is the single strongest signal for what the user is still doing right now.
 
-**Source 2 — Window title keyword match**
+**Source 2 — Past tags for same app**
+Query last 30 days of tags where `session.app_name = current_app_name`. Score by `frequency × recency_weight` where `recency_weight = 1 / (days_ago + 1)`. Take top 3.
+
+**Source 3 — Window title keyword match**
 Strip common stop words from `window_title`. Match remaining tokens against all past `task_label` strings. If overlap >= 1 token, include that label.
 
-**Merge & deduplicate** → keep top 4. If fewer than 2 suggestions found, pad with the user's 2 most-used labels globally.
+**Source 4 — Global top tags (fallback)**
+User's top 2 most-used labels across all time. Only used when fewer than 2 suggestions found from sources 1–3.
+
+**Merge & deduplicate** → keep top 4, preserving priority order. Source 1 results always appear first if present.
 
 ### 5.2 API Endpoint
 
@@ -193,6 +229,23 @@ Response: `{"ok": true}`
 
 On success → popup calls `window.close()`.
 
+### 5.5 Skip Tracking
+
+`POST /api/tag-skip`
+
+Called when user dismisses the popup without tagging (× button, Skip link, or Escape key).
+
+Body:
+```json
+{
+  "session_id": 42
+}
+```
+
+Response: `{"ok": true}`
+
+Saved to a `tag_skips` table (session_id, skipped_at). No tag row is created. This data enables future tuning of: (1) trigger timing — if most skips happen on short sessions, raise the threshold; (2) suggestion quality — if users always type custom labels instead of using suggestions, the suggestion engine needs work. Skip data is never shown to the user.
+
 ---
 
 ## 6. Context Inference Engine
@@ -216,6 +269,10 @@ for each session in chronological order:
             confidence = 0.6
             source = "inferred"
         else:
+            # Break detected — assign UNKNOWN but do NOT count as a context switch.
+            # Rationale: the user may simply have gone idle and resumed the same task.
+            # Counting every break as a switch would inflate the metric and make it
+            # untrustworthy. UNKNOWN is a gap in data, not evidence of a switch.
             context = "UNKNOWN"
             confidence = 0.3
             source = "unknown"
@@ -304,10 +361,10 @@ Context switches today: 4
 ### Changed files
 | File | Changes |
 |------|---------|
-| `tracker/db.py` | Add `session_tags` table, `upsert_tag()`, `get_tag()`, `get_tags_for_app()` |
-| `tracker/api.py` | Add `/tag` (GET page), `/api/tag-suggestions`, `/api/tag` (POST), `/api/tasks` |
+| `tracker/db.py` | Add `session_tags` + `tag_skips` tables; `upsert_tag()`, `get_tag()`, `get_tags_for_app()`, `insert_skip()` |
+| `tracker/api.py` | Add `/tag` (GET page), `/api/tag-suggestions`, `/api/tag` (POST), `/api/tag-skip` (POST), `/api/tasks` |
 | `tracker/analytics.py` | Add `compute_context_timeline()`, enrich `compute_daily_summary()` with tasks + switches |
-| `tracker/main.py` | Wire popup trigger to `on_session_end` and mid-session 5-min check |
+| `tracker/main.py` | Wire popup trigger to `on_session_end` with cooldown + relaxed threshold logic |
 | `dashboard/src/pages/Sessions.tsx` | Add Task column, inline tag button |
 | `dashboard/src/pages/DailyOverview.tsx` | Add Today's Tasks section |
 | `dashboard/src/App.tsx` | Add `SessionTag`, `TaskSummary` types |
