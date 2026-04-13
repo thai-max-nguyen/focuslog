@@ -1,19 +1,19 @@
 import { useEffect, useState } from 'react'
 import { API, type Summary, type Session, CATEGORY_COLORS, AppIcon, CategoryIcon, fmtDuration, fmtTime } from '../App'
 
-function useSummary(date: string) {
+function useSummary(date: string, refreshKey: number) {
   const [data, setData] = useState<Summary | null>(null)
   useEffect(() => {
     fetch(`${API}/api/summary?date=${date}`).then(r => r.json()).then(setData).catch(() => {})
-  }, [date])
+  }, [date, refreshKey])
   return data
 }
 
-function useTimeline(date: string) {
+function useTimeline(date: string, refreshKey: number) {
   const [blocks, setBlocks] = useState<Session[]>([])
   useEffect(() => {
     fetch(`${API}/api/timeline?date=${date}`).then(r => r.json()).then(setBlocks).catch(() => {})
-  }, [date])
+  }, [date, refreshKey])
   return blocks
 }
 
@@ -35,9 +35,9 @@ function FocusRing({ score }: { score: number }) {
 }
 
 
-export default function DailyOverview({ date }: { date: string }) {
-  const summary = useSummary(date)
-  const blocks = useTimeline(date)
+export default function DailyOverview({ date, refreshKey }: { date: string; refreshKey: number }) {
+  const summary = useSummary(date, refreshKey)
+  const blocks = useTimeline(date, refreshKey)
   const [tooltip, setTooltip] = useState<{ text: string; x: number; y: number } | null>(null)
   const DAY = 86400
 

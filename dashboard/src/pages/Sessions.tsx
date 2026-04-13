@@ -5,7 +5,7 @@ import { isBrowserApp, parseBrowserTitle } from '../utils'
 
 const CATEGORIES = ['All Categories', 'Work', 'Communication', 'Learning', 'Entertainment', 'Unknown']
 
-export default function Sessions({ date }: { date: string }) {
+export default function Sessions({ date, refreshKey }: { date: string; refreshKey: number }) {
   const [sessions, setSessions] = useState<Session[]>([])
   const [search, setSearch] = useState('')
   const [cat, setCat] = useState('All Categories')
@@ -13,7 +13,7 @@ export default function Sessions({ date }: { date: string }) {
 
   useEffect(() => {
     fetch(`${API}/api/sessions?date=${date}`).then(r => r.json()).then(setSessions).catch(() => {})
-  }, [date])
+  }, [date, refreshKey])
 
   const filtered = sessions.filter(s =>
     (cat === 'All Categories' || s.category === cat) &&

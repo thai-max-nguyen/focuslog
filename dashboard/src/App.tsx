@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useCallback } from 'react'
 import { format } from 'date-fns'
 import { Briefcase, MessageSquare, BookOpen, Gamepad2, HelpCircle } from 'lucide-react'
 import { isBrowserApp, parseBrowserTitle } from './utils'
@@ -88,19 +88,26 @@ export function fmtTime(ts: number): string {
   return new Date(ts * 1000).toTimeString().slice(0, 8)
 }
 
+function useRefreshKey() {
+  const [refreshKey, setRefreshKey] = useState(0)
+  const refresh = useCallback(() => setRefreshKey(k => k + 1), [])
+  return { refreshKey, refresh }
+}
+
 export default function App() {
   const [page, setPage] = useState<Page>('overview')
   const [date, setDate] = useState(format(new Date(), 'yyyy-MM-dd'))
+  const { refreshKey, refresh } = useRefreshKey()
 
   return (
     <div style={{ display: 'flex', minHeight: '100vh', background: '#131313' }}>
       <Sidebar page={page} onNavigate={setPage} />
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
-        <TopBar date={date} onDateChange={setDate} />
+        <TopBar date={date} onDateChange={setDate} onRefresh={refresh} />
         <main style={{ flex: 1, padding: '24px 32px', overflow: 'auto' }}>
-          {page === 'overview' && <DailyOverview date={date} />}
-          {page === 'sessions' && <Sessions date={date} />}
-          {page === 'trends' && <Trends />}
+          {page === 'overview' && <DailyOverview date={date} refreshKey={refreshKey} />}
+          {page === 'sessions' && <Sessions date={date} refreshKey={refreshKey} />}
+          {page === 'trends' && <Trends refreshKey={refreshKey} />}
           {page === 'rules' && <Rules />}
         </main>
         <StatusBar />

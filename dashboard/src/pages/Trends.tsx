@@ -10,11 +10,11 @@ type WeekDay = {
   categories: Record<string, number>
 }
 
-export default function Trends() {
+export default function Trends({ refreshKey }: { refreshKey: number }) {
   const [week, setWeek] = useState<WeekDay[]>([])
   useEffect(() => {
     fetch(`${API}/api/weekly`).then(r => r.json()).then(setWeek).catch(() => {})
-  }, [])
+  }, [refreshKey])
 
   const avgDeepWork = week.length ? Math.round(week.reduce((a, d) => a + d.deep_work, 0) / week.length) : 0
   const totalFocus = week.reduce((a, d) => a + d.total_active, 0)
