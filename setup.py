@@ -3,6 +3,7 @@
 FocusLog setup script.
 Run: python3 setup.py
 """
+VERSION = "0.2.0"
 import os
 import shutil
 import subprocess
