@@ -25,6 +25,8 @@ export type Summary = {
   categories: Record<string, number>
 }
 
+const APP_ICON_COLORS = ['#4f86f7', '#f7c948', '#4ecdc4', '#ff6b6b', '#b0c6ff', '#568dfe']
+
 export const CATEGORY_COLORS: Record<string, string> = {
   Work: '#4f86f7', Communication: '#f7c948', Learning: '#4ecdc4',
   Entertainment: '#ff6b6b', Unknown: '#555'
@@ -39,10 +41,11 @@ export const CATEGORY_ICONS: Record<string, React.ComponentType<{ size?: number;
 }
 
 export function AppIcon({ name, windowTitle = '', size = 28 }: { name: string; windowTitle?: string; size?: number }) {
-  const colors = ['#4f86f7', '#f7c948', '#4ecdc4', '#ff6b6b', '#b0c6ff', '#568dfe']
-  const color = colors[name.charCodeAt(0) % colors.length]
+  const [faviconError, setFaviconError] = useState(false)
+  const colorIndex = name.length > 0 ? name.charCodeAt(0) % APP_ICON_COLORS.length : 0
+  const color = APP_ICON_COLORS[colorIndex]
 
-  if (isBrowserApp(name) && windowTitle) {
+  if (!faviconError && isBrowserApp(name) && windowTitle) {
     const { domain } = parseBrowserTitle(windowTitle)
     if (domain) {
       return (
@@ -52,16 +55,7 @@ export function AppIcon({ name, windowTitle = '', size = 28 }: { name: string; w
             width={size - 8}
             height={size - 8}
             alt={domain}
-            onError={(e) => {
-              const el = e.currentTarget
-              el.style.display = 'none'
-              const parent = el.parentElement
-              if (parent) {
-                parent.style.background = color + '22'
-                parent.style.border = `1px solid ${color}44`
-                parent.innerHTML = `<span style="font-size:11px;font-weight:700;color:${color}">${name[0]?.toUpperCase()}</span>`
-              }
-            }}
+            onError={() => setFaviconError(true)}
           />
         </div>
       )
@@ -70,7 +64,7 @@ export function AppIcon({ name, windowTitle = '', size = 28 }: { name: string; w
 
   return (
     <div style={{ width: size, height: size, borderRadius: 6, background: color + '22', border: `1px solid ${color}44`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700, color, flexShrink: 0 }}>
-      {name[0]?.toUpperCase()}
+      {name[0]?.toUpperCase() ?? '?'}
     </div>
   )
 }
