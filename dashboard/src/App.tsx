@@ -19,17 +19,25 @@ export type Session = {
   start_time: number; end_time: number; duration: number; is_idle: number
 }
 
+export type CurrentSession = {
+  app_name: string; window_title: string; category: string
+  start_time: number; duration: number; is_current: true
+}
+
 export type Summary = {
   total_active: number; deep_work: number; distractions: number
   productivity_score: number; top_apps: { app_name: string; duration: number }[]
   categories: Record<string, number>
+  longest_session: number; longest_session_app: string
+  peak_hour: number; switch_rate: number
+  focus_efficiency: number; worst_distraction_app: string
 }
 
 const APP_ICON_COLORS = ['#4f86f7', '#f7c948', '#4ecdc4', '#ff6b6b', '#b0c6ff', '#568dfe']
 
 export const CATEGORY_COLORS: Record<string, string> = {
   Work: '#4f86f7', Communication: '#f7c948', Learning: '#4ecdc4',
-  Entertainment: '#ff6b6b', Unknown: '#555'
+  Entertainment: '#ff6b6b', Unknown: '#555', Idle: '#1e1e1e'
 }
 
 export const CATEGORY_ICONS: Record<string, React.ComponentType<{ size?: number; color?: string }>> = {

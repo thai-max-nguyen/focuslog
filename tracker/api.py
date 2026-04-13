@@ -1,6 +1,8 @@
 import csv
 import io
 import json
+import time as _time
+from datetime import datetime
 from typing import Optional
 
 from fastapi import FastAPI, HTTPException
@@ -20,7 +22,7 @@ class RuleCreate(BaseModel):
     category: str
 
 
-def create_app(db: Database) -> FastAPI:
+def create_app(db: Database, watcher=None, classifier=None) -> FastAPI:
     app = FastAPI(title="FocusLog API", version="1.0.0")
 
     app.add_middleware(
@@ -30,13 +32,55 @@ def create_app(db: Database) -> FastAPI:
         allow_headers=["*"],
     )
 
+    def _current_session_dict() -> Optional[dict]:
+        """Read the live in-memory session from the watcher (not yet in DB)."""
+        if watcher is None or not watcher.current_app or not watcher.session_start:
+            return None
+        if watcher.is_idle():
+            return None
+        now = _time.time()
+        raw_app = watcher.current_app
+        title = watcher.current_title
+        url = watcher.current_url
+        app_name = classifier.resolve_app_name(raw_app, title, url) if classifier else raw_app
+        category = classifier.classify(app_name, title) if classifier else "Unknown"
+        start_ts = int(watcher.session_start)
+        end_ts = int(now)
+        return {
+            "id": -1,
+            "app_name": app_name,
+            "window_title": title,
+            "category": category,
+            "start_time": start_ts,
+            "end_time": end_ts,
+            "duration": end_ts - start_ts,
+            "is_idle": 0,
+            "is_current": True,
+        }
+
+    def _is_today(date: str) -> bool:
+        return date == datetime.now().strftime("%Y-%m-%d")
+
+    def _sessions_with_current(date: str) -> list:
+        sessions = db.get_sessions_by_date(date)
+        if _is_today(date):
+            curr = _current_session_dict()
+            if curr:
+                sessions = sessions + [curr]
+        return sessions
+
+    @app.get("/api/current")
+    def get_current():
+        """Live in-memory session — the app being used right now."""
+        return _current_session_dict()
+
     @app.get("/api/sessions")
     def get_sessions(date: str):
-        return db.get_sessions_by_date(date)
+        return _sessions_with_current(date)
 
     @app.get("/api/summary")
     def get_summary(date: str):
-        sessions = db.get_sessions_by_date(date)
+        sessions = _sessions_with_current(date)
         summary = compute_daily_summary(sessions)
         db.upsert_daily_summary(
             date=date,
@@ -50,7 +94,7 @@ def create_app(db: Database) -> FastAPI:
 
     @app.get("/api/timeline")
     def get_timeline(date: str):
-        sessions = db.get_sessions_by_date(date)
+        sessions = _sessions_with_current(date)
         return compute_timeline_blocks(sessions)
 
     @app.get("/api/apps")
@@ -100,9 +144,9 @@ def create_app(db: Database) -> FastAPI:
 
     @app.get("/api/weekly")
     def get_weekly():
-        from datetime import datetime, timedelta, timezone
+        from datetime import datetime, timedelta
         results = []
-        today = datetime.now(timezone.utc).date()
+        today = datetime.now().date()  # local date, not UTC
         for i in range(6, -1, -1):
             d = today - timedelta(days=i)
             date_str = d.strftime("%Y-%m-%d")

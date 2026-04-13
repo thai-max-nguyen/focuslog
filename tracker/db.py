@@ -14,6 +14,10 @@ class Database:
         self.path = path
         self.conn = sqlite3.connect(path, check_same_thread=False)
         self.conn.row_factory = sqlite3.Row
+        # WAL mode: readers don't block writers and vice versa —
+        # prevents "database is locked" when the watcher and API write concurrently.
+        self.conn.execute("PRAGMA journal_mode=WAL")
+        self.conn.execute("PRAGMA synchronous=NORMAL")
 
     def init(self):
         cur = self.conn.cursor()
@@ -76,8 +80,9 @@ class Database:
         return cur.lastrowid
 
     def get_sessions_by_date(self, date: str) -> list:
-        from datetime import datetime, timezone
-        day_start = int(datetime.strptime(date, "%Y-%m-%d").replace(tzinfo=timezone.utc).timestamp())
+        from datetime import datetime
+        # Use local midnight so day boundaries match the user's clock, not UTC
+        day_start = int(datetime.strptime(date, "%Y-%m-%d").timestamp())
         day_end = day_start + 86400
         cur = self.conn.execute(
             "SELECT * FROM sessions WHERE start_time >= ? AND start_time < ? AND is_idle = 0 ORDER BY start_time",

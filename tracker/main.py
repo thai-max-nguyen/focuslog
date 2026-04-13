@@ -31,12 +31,39 @@ logger = logging.getLogger(__name__)
 
 
 def load_rules() -> list[dict]:
+    """Load rules.json and merge any new DEFAULT_RULES entries that are missing.
+
+    User-created rules are never removed.  New default app-name rules are appended
+    so that freshly added app support takes effect without requiring a manual reset.
+    """
+    existing: list[dict] = []
     if os.path.exists(RULES_PATH):
-        with open(RULES_PATH) as f:
-            return json.load(f)
+        try:
+            with open(RULES_PATH) as f:
+                existing = json.load(f)
+        except Exception:
+            pass
+
+    # Index of app names already covered (case-insensitive, no-url rules only)
+    covered = {
+        r["app_name"].lower()
+        for r in existing
+        if r.get("app_name") and not r.get("url_contains")
+    }
+
+    new_entries = [
+        rule for rule in DEFAULT_RULES
+        if not rule.get("url_contains")
+        and rule.get("app_name")
+        and rule["app_name"].lower() not in covered
+    ]
+
+    merged = existing + new_entries
+    os.makedirs(DATA_DIR, exist_ok=True)
     with open(RULES_PATH, "w") as f:
-        json.dump(DEFAULT_RULES, f, indent=2)
-    return DEFAULT_RULES
+        json.dump(merged, f, indent=2)
+
+    return merged
 
 
 def check_permissions():
@@ -89,10 +116,11 @@ class FocusLogApp(rumps.App):
         check_permissions()
         logger.info("FocusLog started")
 
-    def _on_session_end(self, app_name, window_title, start_time, end_time, duration, is_idle):
-        category = self.classifier.classify(app_name, window_title)
+    def _on_session_end(self, app_name, window_title, url, start_time, end_time, duration, is_idle):
+        resolved_name = self.classifier.resolve_app_name(app_name, window_title, url)
+        category = self.classifier.classify(resolved_name, window_title)
         self.db.insert_session(
-            app_name=app_name,
+            app_name=resolved_name,
             window_title=window_title,
             category=category,
             start_time=start_time,
@@ -102,7 +130,7 @@ class FocusLogApp(rumps.App):
         )
 
     def _start_api_server(self):
-        api_app = create_app(self.db)
+        api_app = create_app(self.db, watcher=self.watcher, classifier=self.classifier)
         config = uvicorn.Config(
             api_app,
             host="127.0.0.1",
