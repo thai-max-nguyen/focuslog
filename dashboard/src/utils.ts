@@ -10,7 +10,31 @@ const BROWSER_SUFFIXES = [
   / - Microsoft Edge$/i,
   / - Brave$/i,
   / - Opera$/i,
+  / - Vivaldi$/i,
 ]
+
+const DOMAIN_MAP: Record<string, string> = {
+  'github': 'github.com',
+  'youtube': 'youtube.com',
+  'gmail': 'gmail.com',
+  'google': 'google.com',
+  'stackoverflow': 'stackoverflow.com',
+  'reddit': 'reddit.com',
+  'x.com': 'x.com',
+  'twitter': 'twitter.com',
+  'notion': 'notion.so',
+  'figma': 'figma.com',
+  'linear': 'linear.app',
+  'slack': 'slack.com',
+  'jira': 'atlassian.net',
+  'confluence': 'atlassian.net',
+  'claude': 'claude.ai',
+  'chatgpt': 'openai.com',
+  'netflix': 'netflix.com',
+  'spotify': 'spotify.com',
+  'vercel': 'vercel.com',
+  'railway': 'railway.app',
+}
 
 export function isBrowserApp(appName: string): boolean {
   const lower = appName.toLowerCase()
@@ -24,36 +48,10 @@ export function parseBrowserTitle(windowTitle: string): { cleanTitle: string; do
   }
   clean = clean.trim()
 
-  const domainMap: Record<string, string> = {
-    'github': 'github.com',
-    'youtube': 'youtube.com',
-    'gmail': 'gmail.com',
-    'google': 'google.com',
-    'stackoverflow': 'stackoverflow.com',
-    'reddit': 'reddit.com',
-    'twitter': 'twitter.com',
-    'x.com': 'x.com',
-    'notion': 'notion.so',
-    'figma': 'figma.com',
-    'linear': 'linear.app',
-    'slack': 'slack.com',
-    'jira': 'atlassian.net',
-    'confluence': 'atlassian.net',
-    'claude': 'claude.ai',
-    'chatgpt': 'openai.com',
-    'netflix': 'netflix.com',
-    'spotify': 'spotify.com',
-    'vercel': 'vercel.com',
-    'railway': 'railway.app',
-  }
-
   const titleLower = clean.toLowerCase()
-  for (const [key, domain] of Object.entries(domainMap)) {
+  for (const [key, domain] of Object.entries(DOMAIN_MAP)) {
     if (titleLower.includes(key)) return { cleanTitle: clean, domain }
   }
-
-  const firstWord = clean.split(/[\s\-–|·]/)[0].trim().toLowerCase()
-  if (firstWord.length > 2) return { cleanTitle: clean, domain: `${firstWord}.com` }
 
   return { cleanTitle: clean, domain: '' }
 }
