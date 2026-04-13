@@ -30,13 +30,23 @@ A short human-readable string the user assigns to a session. Examples: "NFC revi
 Every session has a context confidence score:
 - `0.9` — user-tagged (`source = "user"` or `"suggested"`)
 - `0.6` — inferred from previous session (`source = "inferred"`)
+- `0.55` — inferred from app category (`source = "inferred_category"`) — applies to Communication/Entertainment sessions with no tag
 - `0.3` — cannot determine (`source = "unknown"`)
+
+### System Activity
+Some processes that macOS reports as "active apps" are not real user activity. These are classified as `SYSTEM_IDLE` and excluded entirely from tracking.
+
+`SYSTEM_APP_BLOCKLIST = ["loginwindow", "UserNotificationCenter", "SystemUIServer", "Dock", "Finder" (idle), "universalaccessd"]`
+
+System sessions are dropped **at insert time** in `on_session_end` — they are never written to the DB, never trigger tagging, and never appear in any metric or UI.
 
 ---
 
 ## 3. Data Model
 
 ### New table: `session_tags`
+
+Source enum for `session_tags.source`: `user | suggested | inferred | inferred_category | unknown`
 
 ```sql
 CREATE TABLE IF NOT EXISTS session_tags (
@@ -85,6 +95,7 @@ Trigger timing:
 **Do NOT trigger when:**
 - Duration < 3 minutes
 - Session is already tagged
+- `app_name` is in `SYSTEM_APP_BLOCKLIST` — system activity, never prompt
 - A popup is already open (deduplicate by session_id)
 - Last popup was shown < 20 minutes ago (cooldown — see §4.1a)
 - FocusLog has been running < 60 seconds (startup grace period)
@@ -256,10 +267,23 @@ Run at query time when computing analytics (not stored, derived on demand).
 
 ```
 for each session in chronological order:
+    # Step 0: skip system sessions entirely — they are never stored
+    # (filtered at insert time; this loop never sees them)
+
     if session has tag:
         context = tag.task_label
         confidence = 0.9
         source = "user" | "suggested"
+
+    elif session.category in ["Communication", "Entertainment"]:
+        # Category-based auto-label: bridge app category → context label.
+        # These sessions are typically low-cognitive (Slack messages, quick YouTube)
+        # so they get a fallback label rather than inheriting a work task context.
+        # Do NOT treat as deep work. Do NOT override user-provided tags.
+        context = session.category        # e.g. "Communication", "Entertainment"
+        confidence = 0.55
+        source = "inferred_category"
+
     else:
         check break conditions vs previous session:
             - idle gap > 10 minutes
@@ -327,26 +351,73 @@ Add a `Task` column to the existing sessions table.
 
 Clicking "＋ Tag" opens `http://127.0.0.1:7331/tag?session_id=X` (same popup, retroactive tagging).
 
-### 7.2 Daily Overview — Today's Tasks Block (B)
+### 7.2 Daily Overview — Redesigned (Context-first)
 
-New section below the existing stats grid. Title: **"Today's Tasks"**.
+The Daily Overview is restructured to answer **"What did I spend my brain on today?"** rather than "What apps did I open?". Context/task is the primary dimension. App usage is demoted to a secondary collapsible.
 
-Layout: vertical bar chart — one row per task_label, sorted by total duration descending.
+---
+
+#### Primary block: "Today's Work"
+
+Replaces the existing "top apps" leaderboard. Positioned directly below the stats grid.
+
+Layout: horizontal bar rows, sorted by total duration descending.
 
 ```
-Today's Tasks
-─────────────────────────────────────
-🎯 NFC review          ████████████  1h 42m
-🐛 Bug fix eKYC        ████          48m
-📝 Writing ticket      ██            18m
-❓ Unknown             ▒             12m   ← grey, bottom
-─────────────────────────────────────
+Today's Work
+─────────────────────────────────────────────────
+🎯 Fix VNeID Direct issue   ████████████  1h 30m
+🔧 Improve NFC onboarding   █████████     1h 10m
+💬 Communication            ████          45m     ← auto-labeled
+📋 Uncategorized            ▒▒▒           28m     ← clickable
+─────────────────────────────────────────────────
 Context switches today: 4
 ```
 
-- Unknown is always last, always grey
-- Inferred time shown with same color as user-tagged (no visual distinction — it's transparent to the user)
-- "Context switches today: N" — single line below the chart, clickable → scrolls to Sessions table
+**Rendering rules:**
+- User-tagged and inferred sessions: same color per task (no visual distinction — confidence is internal)
+- `inferred_category` labels (Communication, Entertainment): rendered in their category color, slightly muted
+- `Uncategorized` (no tag, no category inference): always last, always grey, always shown — it is a call-to-action
+- UNKNOWN sessions: absorbed into Uncategorized for display (confidence too low to surface)
+- "Context switches today: N" — footer line, clickable → scrolls to Sessions table
+
+**Clickable Uncategorized:**
+Clicking the Uncategorized row opens the Sessions table pre-filtered to untagged sessions. The copy reads: *"Tag a few sessions to see where your time really goes."* This turns the empty bucket into the tagging habit entry point.
+
+---
+
+#### Empty state (Day 1–3 or sparse tagging)
+
+When zero task labels exist for the day (all sessions untagged, no category inference):
+
+```
+┌─────────────────────────────────────────────┐
+│                                             │
+│   📋  No work context yet for today         │
+│                                             │
+│   Tag a few sessions to unlock your         │
+│   daily work breakdown.                     │
+│                                             │
+│        [ View Sessions → ]                  │
+│                                             │
+└─────────────────────────────────────────────┘
+```
+
+Threshold: show empty state when `inferred_category` + user-tagged sessions together cover < 10% of active time. Otherwise show the partial breakdown.
+
+---
+
+#### Secondary block: "App Activity (raw)" — collapsible
+
+Placed below "Today's Work", collapsed by default.
+
+```
+▶ App Activity (raw)        ← click to expand
+```
+
+Expanded view is the existing top-apps leaderboard, unchanged. Label clearly as "(raw)" to communicate this is unprocessed data, not insight.
+
+Rationale: users in Phase 1 will still cross-check "does the tracker see my Figma time?" — keeping this accessible one click away maintains trust without competing with the context view.
 
 ---
 
@@ -364,10 +435,10 @@ Context switches today: 4
 | `tracker/db.py` | Add `session_tags` + `tag_skips` tables; `upsert_tag()`, `get_tag()`, `get_tags_for_app()`, `insert_skip()` |
 | `tracker/api.py` | Add `/tag` (GET page), `/api/tag-suggestions`, `/api/tag` (POST), `/api/tag-skip` (POST), `/api/tasks` |
 | `tracker/analytics.py` | Add `compute_context_timeline()`, enrich `compute_daily_summary()` with tasks + switches |
-| `tracker/main.py` | Wire popup trigger to `on_session_end` with cooldown + relaxed threshold logic |
-| `dashboard/src/pages/Sessions.tsx` | Add Task column, inline tag button |
-| `dashboard/src/pages/DailyOverview.tsx` | Add Today's Tasks section |
-| `dashboard/src/App.tsx` | Add `SessionTag`, `TaskSummary` types |
+| `tracker/main.py` | Wire popup trigger to `on_session_end`; add `SYSTEM_APP_BLOCKLIST` check before `db.insert_session()`; cooldown + relaxed threshold logic |
+| `dashboard/src/pages/Sessions.tsx` | Add Task column, inline tag button; filter out system sessions |
+| `dashboard/src/pages/DailyOverview.tsx` | Redesign: context-first "Today's Work" primary block, empty state, clickable Uncategorized, collapsible "App Activity (raw)" |
+| `dashboard/src/App.tsx` | Add `SessionTag`, `TaskSummary`, `ContextSource` types |
 
 ---
 
