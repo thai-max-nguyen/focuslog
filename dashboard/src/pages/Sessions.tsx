@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Search } from 'lucide-react'
-import { API, type Session, CATEGORY_COLORS, fmtDuration, fmtTime } from '../App'
+import { API, type Session, CATEGORY_COLORS, AppIcon, CategoryIcon, fmtDuration, fmtTime } from '../App'
+import { isBrowserApp, parseBrowserTitle } from '../utils'
 
 const CATEGORIES = ['All Categories', 'Work', 'Communication', 'Learning', 'Entertainment', 'Unknown']
 
@@ -61,13 +62,16 @@ export default function Sessions({ date }: { date: string }) {
           return (
             <div key={s.id} style={{ display: 'grid', gridTemplateColumns: '200px 1fr 160px 120px 100px', gap: 16, alignItems: 'center', background: '#201f1f', borderRadius: 10, padding: '14px 16px 14px 0', borderLeft: `4px solid ${color}`, paddingLeft: 16 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
-                <div style={{ width: 26, height: 26, borderRadius: 6, background: color + '22', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700, color, flexShrink: 0 }}>
-                  {s.app_name[0]?.toUpperCase()}
-                </div>
+                <AppIcon name={s.app_name} windowTitle={s.window_title} size={26} />
                 <span style={{ fontSize: 13, fontWeight: 500, color: '#e5e2e1', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{s.app_name}</span>
               </div>
-              <span style={{ fontSize: 12, color: '#6b6b6b', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.window_title || '—'}</span>
-              <span style={{ display: 'inline-block', padding: '3px 10px', borderRadius: 20, background: color + '22', color, fontSize: 10, fontWeight: 600, letterSpacing: '0.08em', whiteSpace: 'nowrap' }}>
+              <span style={{ fontSize: 12, color: '#6b6b6b', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {isBrowserApp(s.app_name) && s.window_title
+                  ? parseBrowserTitle(s.window_title).cleanTitle || s.window_title
+                  : s.window_title || '—'}
+              </span>
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '3px 10px', borderRadius: 20, background: color + '22', color, fontSize: 10, fontWeight: 600, letterSpacing: '0.08em', whiteSpace: 'nowrap' }}>
+                <CategoryIcon category={s.category} size={10} />
                 {s.category.toUpperCase()}
               </span>
               <span style={{ fontSize: 12, color: '#6b6b6b', fontVariantNumeric: 'tabular-nums' }}>{fmtTime(s.start_time)}</span>

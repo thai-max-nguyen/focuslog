@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { API, type Summary, type Session, CATEGORY_COLORS, fmtDuration, fmtTime } from '../App'
+import { API, type Summary, type Session, CATEGORY_COLORS, AppIcon, CategoryIcon, fmtDuration, fmtTime } from '../App'
 
 function useSummary(date: string) {
   const [data, setData] = useState<Summary | null>(null)
@@ -34,15 +34,6 @@ function FocusRing({ score }: { score: number }) {
   )
 }
 
-function AppIcon({ name }: { name: string }) {
-  const colors = ['#4f86f7','#f7c948','#4ecdc4','#ff6b6b','#b0c6ff','#568dfe']
-  const color = colors[name.charCodeAt(0) % colors.length]
-  return (
-    <div style={{ width: 28, height: 28, borderRadius: 6, background: color + '22', border: `1px solid ${color}44`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700, color, flexShrink: 0 }}>
-      {name[0]?.toUpperCase()}
-    </div>
-  )
-}
 
 export default function DailyOverview({ date }: { date: string }) {
   const summary = useSummary(date)
@@ -115,7 +106,10 @@ export default function DailyOverview({ date }: { date: string }) {
               {Object.entries(summary.categories).map(([cat, secs]) => (
                 <div key={cat} style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
                   <div style={{ width: 3, height: 24, borderRadius: 2, background: CATEGORY_COLORS[cat] ?? '#555', flexShrink: 0 }} />
-                  <span style={{ flex: 1, fontSize: 12, color: '#aaa' }}>{cat}</span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <CategoryIcon category={cat} size={12} />
+                    <span style={{ flex: 1, fontSize: 12, color: '#aaa' }}>{cat}</span>
+                  </div>
                   <span style={{ fontSize: 12, fontWeight: 600, color: '#e5e2e1' }}>{Math.round((secs / totalCat) * 100)}%</span>
                 </div>
               ))}
