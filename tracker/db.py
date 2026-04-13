@@ -51,6 +51,24 @@ class Database:
             );
 
             CREATE INDEX IF NOT EXISTS idx_sessions_start ON sessions(start_time);
+
+            CREATE TABLE IF NOT EXISTS session_tags (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id  INTEGER NOT NULL REFERENCES sessions(id),
+                task_label  TEXT NOT NULL,
+                source      TEXT NOT NULL DEFAULT 'user',
+                confidence  REAL NOT NULL DEFAULT 0.9,
+                created_at  INTEGER NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS tag_skips (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id  INTEGER NOT NULL REFERENCES sessions(id),
+                skipped_at  INTEGER NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_tags_session    ON session_tags(session_id);
+            CREATE INDEX IF NOT EXISTS idx_tags_label      ON session_tags(task_label);
         """)
         self.conn.commit()
 
@@ -126,6 +144,95 @@ class Database:
         cur = self.conn.execute("SELECT * FROM daily_summary WHERE date = ?", (date,))
         row = cur.fetchone()
         return dict(row) if row else None
+
+    def upsert_tag(self, session_id: int, task_label: str, source: str, confidence: float) -> int:
+        import time as _time
+        existing = self.get_tag(session_id)
+        if existing:
+            self.conn.execute(
+                "UPDATE session_tags SET task_label=?, source=?, confidence=?, created_at=? WHERE session_id=?",
+                (task_label, source, confidence, int(_time.time()), session_id)
+            )
+            self.conn.commit()
+            return existing["id"]
+        cur = self.conn.execute(
+            "INSERT INTO session_tags (session_id, task_label, source, confidence, created_at) VALUES (?, ?, ?, ?, ?)",
+            (session_id, task_label, source, confidence, int(_time.time()))
+        )
+        self.conn.commit()
+        return cur.lastrowid
+
+    def get_tag(self, session_id: int) -> Optional[dict]:
+        cur = self.conn.execute(
+            "SELECT * FROM session_tags WHERE session_id = ?", (session_id,)
+        )
+        row = cur.fetchone()
+        return dict(row) if row else None
+
+    def get_recent_tags(self, limit: int = 5) -> list:
+        cur = self.conn.execute(
+            """SELECT st.task_label, st.source, st.confidence, st.created_at
+               FROM session_tags st
+               ORDER BY st.created_at DESC, st.id DESC LIMIT ?""",
+            (limit,)
+        )
+        return [dict(row) for row in cur.fetchall()]
+
+    def get_tags_for_app(self, app_name: str, days: int = 30) -> list:
+        import time as _time
+        since = int(_time.time()) - days * 86400
+        cur = self.conn.execute(
+            """SELECT st.task_label, st.source, st.confidence, st.created_at,
+                      COUNT(*) as frequency
+               FROM session_tags st
+               JOIN sessions s ON s.id = st.session_id
+               WHERE s.app_name = ? AND st.created_at >= ?
+               GROUP BY st.task_label
+               ORDER BY (CAST(COUNT(*) AS REAL) / (1.0 + (? - MAX(st.created_at)) / 86400.0)) DESC
+               LIMIT 10""",
+            (app_name, since, int(_time.time()))
+        )
+        return [dict(row) for row in cur.fetchall()]
+
+    def get_top_tags(self, limit: int = 10) -> list:
+        cur = self.conn.execute(
+            """SELECT task_label, COUNT(*) as frequency
+               FROM session_tags
+               GROUP BY task_label
+               ORDER BY frequency DESC LIMIT ?""",
+            (limit,)
+        )
+        return [dict(row) for row in cur.fetchall()]
+
+    def get_all_tags(self, limit: int = 200) -> list:
+        cur = self.conn.execute(
+            "SELECT DISTINCT task_label FROM session_tags ORDER BY created_at DESC LIMIT ?",
+            (limit,)
+        )
+        return [dict(row) for row in cur.fetchall()]
+
+    def insert_skip(self, session_id: int) -> None:
+        import time as _time
+        self.conn.execute(
+            "INSERT INTO tag_skips (session_id, skipped_at) VALUES (?, ?)",
+            (session_id, int(_time.time()))
+        )
+        self.conn.commit()
+
+    def get_sessions_by_date_with_tags(self, date: str) -> list:
+        """Sessions for a date, each enriched with task_label/source/confidence if tagged."""
+        from datetime import datetime
+        day_start = int(datetime.strptime(date, "%Y-%m-%d").timestamp())
+        day_end = day_start + 86400
+        cur = self.conn.execute(
+            """SELECT s.*, st.task_label, st.source AS task_source, st.confidence AS task_confidence
+               FROM sessions s
+               LEFT JOIN session_tags st ON st.session_id = s.id
+               WHERE s.start_time >= ? AND s.start_time < ? AND s.is_idle = 0
+               ORDER BY s.start_time""",
+            (day_start, day_end)
+        )
+        return [dict(row) for row in cur.fetchall()]
 
     def close(self):
         self.conn.close()
