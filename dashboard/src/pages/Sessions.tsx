@@ -4,6 +4,7 @@ import { API, type SessionWithTag, CATEGORY_COLORS, AppIcon, CategoryIcon, fmtDu
 import { isBrowserApp, parseBrowserTitle } from '../utils'
 
 const CATEGORIES = ['All Categories', 'Work', 'Communication', 'Learning', 'Entertainment', 'Unknown']
+const MIN_TAGGABLE_DURATION_SECS = 3 * 60
 
 function TaskPill({ session }: { session: SessionWithTag }) {
   if (session.task_label) {
@@ -22,10 +23,13 @@ function TaskPill({ session }: { session: SessionWithTag }) {
       </span>
     )
   }
-  if ((session.duration ?? 0) >= 3 * 60) {
+  if ((session.duration ?? 0) >= MIN_TAGGABLE_DURATION_SECS) {
     return (
       <button
-        onClick={() => window.open(`${API}/tag?session_id=${session.id}`, '_blank', 'width=390,height=320')}
+        onClick={() => {
+          const w = window.open(`${API}/tag?session_id=${session.id}`, '_blank', 'width=390,height=320')
+          if (!w) window.location.href = `${API}/tag?session_id=${session.id}`
+        }}
         style={{
           background: 'none', border: '1px solid #2a2a2a', borderRadius: 12,
           color: '#555', fontSize: 11, cursor: 'pointer', padding: '3px 9px',
@@ -65,7 +69,7 @@ export default function Sessions({ date, refreshKey }: { date: string; refreshKe
   const mm = String(Math.floor((totalActive % 3600) / 60)).padStart(2, '0')
   const ss = String(totalActive % 60).padStart(2, '0')
 
-  const untaggedCount = sessions.filter(s => !s.task_label && (s.duration ?? 0) >= 3 * 60).length
+  const untaggedCount = sessions.filter(s => !s.task_label && (s.duration ?? 0) >= MIN_TAGGABLE_DURATION_SECS).length
 
   return (
     <div>
@@ -122,7 +126,7 @@ export default function Sessions({ date, refreshKey }: { date: string; refreshKe
           return (
             <div key={s.id} style={{ display: 'grid', gridTemplateColumns: '180px 1fr 140px 110px 90px 150px', gap: 12, alignItems: 'center', background: '#201f1f', borderRadius: 10, padding: '12px 16px', borderLeft: `4px solid ${color}` }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
-                <AppIcon name={s.app_name} windowTitle={s.window_title} size={26} />
+                <AppIcon name={s.app_name} windowTitle={s.window_title ?? undefined} size={26} />
                 <span style={{ fontSize: 13, fontWeight: 500, color: '#e5e2e1', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{s.app_name}</span>
               </div>
               <span style={{ fontSize: 12, color: '#6b6b6b', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>

@@ -15,7 +15,7 @@ export type Page = 'overview' | 'sessions' | 'trends' | 'rules'
 export const API = 'http://127.0.0.1:7331'
 
 export type Session = {
-  id: number; app_name: string; window_title: string; category: string
+  id: number; app_name: string; window_title: string | null; category: string
   start_time: number; end_time: number; duration: number; is_idle: number
 }
 
