@@ -120,6 +120,12 @@ class FocusLogApp(rumps.App):
         logger.info("FocusLog started")
 
     def _on_session_end(self, app_name, window_title, url, start_time, end_time, duration, is_idle):
+        try:
+            self._handle_session_end(app_name, window_title, url, start_time, end_time, duration, is_idle)
+        except Exception as e:
+            logger.error(f"session_end error: {e}", exc_info=True)
+
+    def _handle_session_end(self, app_name, window_title, url, start_time, end_time, duration, is_idle):
         resolved_name = self.classifier.resolve_app_name(app_name, window_title, url)
 
         # Drop system-level processes — not real user activity
@@ -152,15 +158,33 @@ class FocusLogApp(rumps.App):
 
     def _start_api_server(self):
         api_app = create_app(self.db, watcher=self.watcher, classifier=self.classifier, tagger=self.trigger_engine)
-        config = uvicorn.Config(
-            api_app,
-            host="127.0.0.1",
-            port=PORT,
-            log_level="warning",
-            access_log=False
-        )
-        server = uvicorn.Server(config)
-        thread = threading.Thread(target=server.run, daemon=True)
+
+        def _run_server():
+            attempt = 0
+            while True:
+                attempt += 1
+                try:
+                    config = uvicorn.Config(
+                        api_app,
+                        host="127.0.0.1",
+                        port=PORT,
+                        log_level="warning",
+                        access_log=False,
+                    )
+                    server = uvicorn.Server(config)
+                    server.run()
+                    logger.warning(f"API server exited (attempt {attempt}), restarting in 3s")
+                except OSError as e:
+                    if "address already in use" in str(e).lower():
+                        logger.error(f"Port {PORT} in use — another FocusLog instance may be running")
+                        return  # Don't retry port conflicts
+                    logger.error(f"API server OSError: {e}, restarting in 3s")
+                except Exception as e:
+                    logger.error(f"API server error: {e}, restarting in 3s")
+                import time as _t
+                _t.sleep(3)
+
+        thread = threading.Thread(target=_run_server, daemon=True)
         thread.start()
 
     @rumps.clicked("Open Dashboard")
