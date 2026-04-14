@@ -141,8 +141,9 @@ def test_insert_skip(db):
 
 
 def test_get_sessions_by_date_with_tags(db):
-    from datetime import datetime, timezone
-    day_start = int(datetime(2024, 1, 15, 0, 0, 0, tzinfo=timezone.utc).timestamp())
+    from datetime import datetime
+    # Use local midnight — matches how get_sessions_by_date_with_tags parses the date string
+    day_start = int(datetime.strptime("2024-01-15", "%Y-%m-%d").timestamp())
 
     # Tagged session
     sid1 = db.insert_session("Jira", "Board", "Work", day_start + 3600, day_start + 4200, 600, False)

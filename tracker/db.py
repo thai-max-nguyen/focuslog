@@ -54,7 +54,7 @@ class Database:
 
             CREATE TABLE IF NOT EXISTS session_tags (
                 id          INTEGER PRIMARY KEY AUTOINCREMENT,
-                session_id  INTEGER NOT NULL REFERENCES sessions(id),
+                session_id  INTEGER NOT NULL UNIQUE REFERENCES sessions(id),
                 task_label  TEXT NOT NULL,
                 source      TEXT NOT NULL DEFAULT 'user',
                 confidence  REAL NOT NULL DEFAULT 0.9,
@@ -147,16 +147,14 @@ class Database:
 
     def upsert_tag(self, session_id: int, task_label: str, source: str, confidence: float) -> int:
         import time as _time
-        existing = self.get_tag(session_id)
-        if existing:
-            self.conn.execute(
-                "UPDATE session_tags SET task_label=?, source=?, confidence=?, created_at=? WHERE session_id=?",
-                (task_label, source, confidence, int(_time.time()), session_id)
-            )
-            self.conn.commit()
-            return existing["id"]
         cur = self.conn.execute(
-            "INSERT INTO session_tags (session_id, task_label, source, confidence, created_at) VALUES (?, ?, ?, ?, ?)",
+            """INSERT INTO session_tags (session_id, task_label, source, confidence, created_at)
+               VALUES (?, ?, ?, ?, ?)
+               ON CONFLICT(session_id) DO UPDATE SET
+                 task_label=excluded.task_label,
+                 source=excluded.source,
+                 confidence=excluded.confidence,
+                 created_at=excluded.created_at""",
             (session_id, task_label, source, confidence, int(_time.time()))
         )
         self.conn.commit()
@@ -206,7 +204,7 @@ class Database:
 
     def get_all_tags(self, limit: int = 200) -> list:
         cur = self.conn.execute(
-            "SELECT DISTINCT task_label FROM session_tags ORDER BY created_at DESC LIMIT ?",
+            "SELECT task_label FROM session_tags GROUP BY task_label ORDER BY MAX(created_at) DESC LIMIT ?",
             (limit,)
         )
         return [dict(row) for row in cur.fetchall()]
