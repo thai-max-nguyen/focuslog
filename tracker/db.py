@@ -145,6 +145,13 @@ class Database:
         row = cur.fetchone()
         return dict(row) if row else None
 
+    def get_session_by_id(self, session_id: int) -> Optional[dict]:
+        cur = self.conn.execute(
+            "SELECT * FROM sessions WHERE id = ? AND is_idle = 0", (session_id,)
+        )
+        row = cur.fetchone()
+        return dict(row) if row else None
+
     def upsert_tag(self, session_id: int, task_label: str, source: str, confidence: float) -> int:
         import time as _time
         cur = self.conn.execute(

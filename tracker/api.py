@@ -3,17 +3,19 @@ import io
 import json
 import time as _time
 from datetime import datetime
-from typing import Optional
+from typing import Literal, Optional
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from tracker.db import Database
 from tracker.analytics import compute_daily_summary, compute_timeline_blocks
 import os
+
+_USER_TAG_CONFIDENCE = 0.9
 
 
 class RuleCreate(BaseModel):
@@ -24,8 +26,8 @@ class RuleCreate(BaseModel):
 
 class TagCreate(BaseModel):
     session_id: int
-    task_label: str
-    source: str  # "user" | "suggested"
+    task_label: str = Field(min_length=1, max_length=200)
+    source: Literal["user", "suggested"]
 
 class TagSkip(BaseModel):
     session_id: int
@@ -199,19 +201,15 @@ def create_app(db: Database, watcher=None, classifier=None, tagger=None) -> Fast
             raise HTTPException(status_code=404, detail="Popup template not found")
         with open(popup_path) as f:
             html = f.read()
-        from fastapi.responses import HTMLResponse
         return HTMLResponse(content=html)
 
     @app.get("/api/tag-suggestions")
     def get_tag_suggestions(session_id: int):
         """Return context sentence + suggestions for the popup."""
         from tracker.tagger import get_suggestions
-        session = db.conn.execute(
-            "SELECT * FROM sessions WHERE id = ?", (session_id,)
-        ).fetchone()
+        session = db.get_session_by_id(session_id)
         if not session:
             raise HTTPException(status_code=404, detail="Session not found")
-        session = dict(session)
         suggestions = get_suggestions(db, session["app_name"], session.get("window_title") or "")
         duration = session["duration"] or 0
         if duration >= 3600:
@@ -231,7 +229,7 @@ def create_app(db: Database, watcher=None, classifier=None, tagger=None) -> Fast
     @app.post("/api/tag")
     def create_tag(tag: TagCreate):
         """Save a tag and notify TriggerEngine to reset cooldown."""
-        db.upsert_tag(tag.session_id, tag.task_label, tag.source, 0.9)
+        db.upsert_tag(tag.session_id, tag.task_label, tag.source, _USER_TAG_CONFIDENCE)
         if tagger is not None:
             tagger.record_tag(tag.session_id)
         return {"ok": True}
