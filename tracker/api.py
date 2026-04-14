@@ -206,11 +206,18 @@ def create_app(db: Database, watcher=None, classifier=None, tagger=None) -> Fast
     @app.get("/api/tag-suggestions")
     def get_tag_suggestions(session_id: int):
         """Return context sentence + suggestions for the popup."""
-        from tracker.tagger import get_suggestions
+        from tracker.tagger import get_suggestions, active_context
         session = db.get_session_by_id(session_id)
         if not session:
             raise HTTPException(status_code=404, detail="Session not found")
-        suggestions = get_suggestions(db, session["app_name"], session.get("window_title") or "")
+        # Notify active_context that the user is still active; resets the 30min idle clock.
+        active_context.notify_activity()
+        suggestions = get_suggestions(
+            db,
+            session["app_name"],
+            session.get("window_title") or "",
+            active_ctx=active_context.get(),
+        )
         duration = session["duration"] or 0
         if duration >= 3600:
             h = duration // 3600
@@ -229,7 +236,12 @@ def create_app(db: Database, watcher=None, classifier=None, tagger=None) -> Fast
     @app.post("/api/tag")
     def create_tag(tag: TagCreate):
         """Save a tag and notify TriggerEngine to reset cooldown."""
-        db.upsert_tag(tag.session_id, tag.task_label, tag.source, _USER_TAG_CONFIDENCE)
+        from tracker.tagger import active_context
+        # Suggestion clicks are treated as strong signals (0.8); explicit user tags get 0.9.
+        ctx_confidence = 0.8 if tag.source == "suggested" else _USER_TAG_CONFIDENCE
+        db.upsert_tag(tag.session_id, tag.task_label, tag.source, ctx_confidence)
+        active_context.set(tag.task_label, confidence=ctx_confidence)
+        active_context.notify_activity()
         if tagger is not None:
             tagger.record_tag(tag.session_id)
         return {"ok": True}

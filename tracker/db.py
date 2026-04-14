@@ -209,6 +209,40 @@ class Database:
         )
         return [dict(row) for row in cur.fetchall()]
 
+    def get_recent_unique_tags(self, limit: int = 3, days: int = 7) -> list:
+        """
+        Last N unique task_labels ranked by time-decayed session duration.
+
+        Decay weights by age of the session:
+          today      → 1.0
+          yesterday  → 0.7
+          2–7 days   → 0.4
+        """
+        import time as _time
+        now = int(_time.time())
+        since = now - days * 86400
+        today_start     = now - (now % 86400)          # midnight UTC approx
+        yesterday_start = today_start - 86400
+        cur = self.conn.execute(
+            """SELECT st.task_label,
+                      SUM(
+                          s.duration * CASE
+                              WHEN s.start_time >= ? THEN 1.0
+                              WHEN s.start_time >= ? THEN 0.7
+                              ELSE                       0.4
+                          END
+                      ) AS decayed_duration,
+                      MAX(st.created_at) AS last_used
+               FROM session_tags st
+               JOIN sessions s ON s.id = st.session_id
+               WHERE st.created_at >= ?
+               GROUP BY st.task_label
+               ORDER BY decayed_duration DESC, last_used DESC
+               LIMIT ?""",
+            (today_start, yesterday_start, since, limit),
+        )
+        return [dict(row) for row in cur.fetchall()]
+
     def get_all_tags(self, limit: int = 200) -> list:
         cur = self.conn.execute(
             "SELECT task_label FROM session_tags GROUP BY task_label ORDER BY MAX(created_at) DESC LIMIT ?",

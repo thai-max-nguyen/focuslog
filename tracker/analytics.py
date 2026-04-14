@@ -127,7 +127,8 @@ def compute_timeline_blocks(sessions: list[dict]) -> list[dict]:
 
 
 _CATEGORY_AUTO_LABELS: frozenset = frozenset({"Communication", "Entertainment"})
-_IDLE_GAP_THRESHOLD = 10 * 60   # 10 minutes
+_INHERITANCE_HIGH_GAP = 10 * 60   # ≤10 min → confidence 0.7
+_INHERITANCE_LOW_GAP  = 30 * 60   # ≤30 min → confidence 0.5
 
 
 def resolve_session_context(sessions: list) -> list:
@@ -138,6 +139,11 @@ def resolve_session_context(sessions: list) -> list:
     duration, task_label (str|None), task_source (str|None).
     Returns new dicts with additional keys: context_label, context_source,
     context_confidence.
+
+    Inheritance decay:
+      gap ≤ 10 min  → confidence 0.7
+      gap 10–30 min → confidence 0.5
+      gap > 30 min  → break chain
     """
     resolved = []
     prev_label = None
@@ -167,21 +173,36 @@ def resolve_session_context(sessions: list) -> list:
                 "context_source": "inferred_category",
                 "context_confidence": 0.55,
             }
-            # Don't propagate category labels as prev_label for inheritance
+            # Break the inheritance chain — work context must not bleed across
+            # a distraction or messaging session.
+            prev_label = None
             prev_end_time = session["end_time"]
             resolved.append(ctx)
             continue
 
-        # --- Try inheritance from previous session ---
-        idle_gap = (session["start_time"] - prev_end_time) if prev_end_time is not None else _IDLE_GAP_THRESHOLD + 1
-        category_jump = session.get("category") in _CATEGORY_AUTO_LABELS
+        # --- Inheritance with decay ---
+        idle_gap = (
+            (session["start_time"] - prev_end_time)
+            if prev_end_time is not None
+            else _INHERITANCE_LOW_GAP + 1
+        )
 
-        if prev_label and idle_gap <= _IDLE_GAP_THRESHOLD and not category_jump:
+        if prev_label and session.get("category") not in _CATEGORY_AUTO_LABELS:
+            if idle_gap <= _INHERITANCE_HIGH_GAP:
+                confidence: float | None = 0.7
+            elif idle_gap <= _INHERITANCE_LOW_GAP:
+                confidence = 0.5
+            else:
+                confidence = None   # gap too large → break chain
+        else:
+            confidence = None
+
+        if confidence is not None:
             ctx = {
                 **session,
                 "context_label": prev_label,
                 "context_source": "inferred",
-                "context_confidence": 0.6,
+                "context_confidence": confidence,
             }
             prev_end_time = session["end_time"]
             resolved.append(ctx)
