@@ -22,7 +22,16 @@ class RuleCreate(BaseModel):
     category: str
 
 
-def create_app(db: Database, watcher=None, classifier=None) -> FastAPI:
+class TagCreate(BaseModel):
+    session_id: int
+    task_label: str
+    source: str  # "user" | "suggested"
+
+class TagSkip(BaseModel):
+    session_id: int
+
+
+def create_app(db: Database, watcher=None, classifier=None, tagger=None) -> FastAPI:
     app = FastAPI(title="FocusLog API", version="1.0.0")
 
     app.add_middleware(
@@ -142,6 +151,29 @@ def create_app(db: Database, watcher=None, classifier=None) -> FastAPI:
         db.delete_rule(rule_id)
         return {"deleted": rule_id}
 
+    @app.post("/api/reclassify")
+    def reclassify_unknown():
+        """Reclassify all Unknown sessions using current classifier rules."""
+        if classifier is None:
+            raise HTTPException(status_code=503, detail="Classifier not available")
+        rows = db.conn.execute(
+            "SELECT id, app_name, window_title FROM sessions WHERE category='Unknown' AND is_idle=0"
+        ).fetchall()
+        updated = 0
+        still_unknown = 0
+        for row in rows:
+            app_name = row["app_name"] if hasattr(row, "__getitem__") else row[1]
+            window_title = row["window_title"] if hasattr(row, "__getitem__") else row[2]
+            id_ = row["id"] if hasattr(row, "__getitem__") else row[0]
+            cat = classifier.classify(app_name, window_title or "")
+            if cat != "Unknown":
+                db.conn.execute("UPDATE sessions SET category=? WHERE id=?", (cat, id_))
+                updated += 1
+            else:
+                still_unknown += 1
+        db.conn.commit()
+        return {"updated": updated, "still_unknown": still_unknown}
+
     @app.get("/api/weekly")
     def get_weekly():
         from datetime import datetime, timedelta
@@ -158,6 +190,78 @@ def create_app(db: Database, watcher=None, classifier=None) -> FastAPI:
                 **summary
             })
         return results
+
+    @app.get("/tag")
+    def tag_popup_page(session_id: int):
+        """Serve the standalone tagging popup HTML."""
+        popup_path = os.path.join(os.path.dirname(__file__), "tag_popup.html")
+        if not os.path.exists(popup_path):
+            raise HTTPException(status_code=404, detail="Popup template not found")
+        with open(popup_path) as f:
+            html = f.read()
+        from fastapi.responses import HTMLResponse
+        return HTMLResponse(content=html)
+
+    @app.get("/api/tag-suggestions")
+    def get_tag_suggestions(session_id: int):
+        """Return context sentence + suggestions for the popup."""
+        from tracker.tagger import get_suggestions
+        session = db.conn.execute(
+            "SELECT * FROM sessions WHERE id = ?", (session_id,)
+        ).fetchone()
+        if not session:
+            raise HTTPException(status_code=404, detail="Session not found")
+        session = dict(session)
+        suggestions = get_suggestions(db, session["app_name"], session.get("window_title") or "")
+        duration = session["duration"] or 0
+        if duration >= 3600:
+            h = duration // 3600
+            m = (duration % 3600) // 60
+            duration_str = f"{h}h {m}m" if m else f"{h}h"
+        else:
+            duration_str = f"{duration // 60} minutes"
+        return {
+            "session_id": session_id,
+            "app_name": session["app_name"],
+            "duration": duration,
+            "duration_str": duration_str,
+            "suggestions": suggestions,
+        }
+
+    @app.post("/api/tag")
+    def create_tag(tag: TagCreate):
+        """Save a tag and notify TriggerEngine to reset cooldown."""
+        db.upsert_tag(tag.session_id, tag.task_label, tag.source, 0.9)
+        if tagger is not None:
+            tagger.record_tag(tag.session_id)
+        return {"ok": True}
+
+    @app.post("/api/tag-skip")
+    def tag_skip(skip: TagSkip):
+        """Record that the user dismissed the popup without tagging."""
+        db.insert_skip(skip.session_id)
+        if tagger is not None:
+            tagger.record_skip(skip.session_id)
+        return {"ok": True}
+
+    @app.get("/api/tasks")
+    def get_tasks(date: str):
+        """Run context inference and return task aggregates for a date."""
+        from tracker.analytics import resolve_session_context, compute_context_switches, aggregate_tasks
+        sessions = db.get_sessions_by_date_with_tags(date)
+        if _is_today(date):
+            curr = _current_session_dict()
+            if curr:
+                # Current session has no tag yet
+                curr["task_label"] = None
+                curr["task_source"] = None
+                curr["task_confidence"] = None
+                sessions = sessions + [curr]
+        resolved = resolve_session_context(sessions)
+        return {
+            "tasks": aggregate_tasks(resolved),
+            "total_context_switches": compute_context_switches(resolved),
+        }
 
     # Serve pre-built React dashboard
     dist_path = os.path.join(os.path.dirname(__file__), "..", "dashboard", "dist")
