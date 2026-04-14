@@ -174,7 +174,7 @@ def resolve_session_context(sessions: list) -> list:
 
         # --- Try inheritance from previous session ---
         idle_gap = (session["start_time"] - prev_end_time) if prev_end_time is not None else _IDLE_GAP_THRESHOLD + 1
-        category_jump = session.get("category") in {"Entertainment", "Unknown"}
+        category_jump = session.get("category") in _CATEGORY_AUTO_LABELS
 
         if prev_label and idle_gap <= _IDLE_GAP_THRESHOLD and not category_jump:
             ctx = {
