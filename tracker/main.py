@@ -15,7 +15,7 @@ import uvicorn
 from tracker.api import create_app
 from tracker.classifier import Classifier, DEFAULT_RULES
 from tracker.db import Database
-from tracker.tagger import is_system_app
+from tracker.tagger import is_system_app, TriggerEngine
 from tracker.watcher import WindowWatcher
 
 DATA_DIR = os.path.expanduser("~/Library/Application Support/focuslog")
@@ -97,6 +97,8 @@ class FocusLogApp(rumps.App):
         self.db.init()
 
         self.classifier = Classifier(load_rules())
+        self.trigger_engine = TriggerEngine()
+        self._prev_session_app: str = ""
 
         self.watcher = WindowWatcher(
             poll_interval=5,
@@ -125,7 +127,7 @@ class FocusLogApp(rumps.App):
             return
 
         category = self.classifier.classify(resolved_name, window_title)
-        self.db.insert_session(
+        session_id = self.db.insert_session(
             app_name=resolved_name,
             window_title=window_title,
             category=category,
@@ -135,8 +137,21 @@ class FocusLogApp(rumps.App):
             is_idle=is_idle
         )
 
+        # Trigger tagging popup for meaningful non-idle sessions
+        if not is_idle and self.trigger_engine.should_trigger(
+            session_id=session_id,
+            app_name=resolved_name,
+            duration=duration,
+            prev_app_name=self._prev_session_app,
+        ):
+            self.trigger_engine.record_open(session_id)
+            webbrowser.open_new(f"http://127.0.0.1:{PORT}/tag?session_id={session_id}")
+            logger.info(f"Popup opened for session {session_id} ({resolved_name}, {duration}s)")
+
+        self._prev_session_app = resolved_name
+
     def _start_api_server(self):
-        api_app = create_app(self.db, watcher=self.watcher, classifier=self.classifier)
+        api_app = create_app(self.db, watcher=self.watcher, classifier=self.classifier, tagger=self.trigger_engine)
         config = uvicorn.Config(
             api_app,
             host="127.0.0.1",
