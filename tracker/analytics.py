@@ -124,3 +124,126 @@ def compute_timeline_blocks(sessions: list[dict]) -> list[dict]:
 
     merged.append(current)
     return merged
+
+
+_CATEGORY_AUTO_LABELS: frozenset = frozenset({"Communication", "Entertainment"})
+_IDLE_GAP_THRESHOLD = 10 * 60   # 10 minutes
+
+
+def resolve_session_context(sessions: list) -> list:
+    """
+    Resolve context (task_label, source, confidence) for each session.
+
+    Each session dict must have keys: id, category, start_time, end_time,
+    duration, task_label (str|None), task_source (str|None).
+    Returns new dicts with additional keys: context_label, context_source,
+    context_confidence.
+    """
+    resolved = []
+    prev_label = None
+    prev_end_time = None
+
+    for session in sessions:
+        tagged_label = session.get("task_label")
+
+        # --- User/suggested tag (highest confidence) ---
+        if tagged_label:
+            ctx = {
+                **session,
+                "context_label": tagged_label,
+                "context_source": session.get("task_source") or "user",
+                "context_confidence": 0.9,
+            }
+            prev_label = tagged_label
+            prev_end_time = session["end_time"]
+            resolved.append(ctx)
+            continue
+
+        # --- Category auto-label (Communication / Entertainment) ---
+        if session.get("category") in _CATEGORY_AUTO_LABELS:
+            ctx = {
+                **session,
+                "context_label": session["category"],
+                "context_source": "inferred_category",
+                "context_confidence": 0.55,
+            }
+            # Don't propagate category labels as prev_label for inheritance
+            prev_end_time = session["end_time"]
+            resolved.append(ctx)
+            continue
+
+        # --- Try inheritance from previous session ---
+        idle_gap = (session["start_time"] - prev_end_time) if prev_end_time is not None else _IDLE_GAP_THRESHOLD + 1
+        category_jump = session.get("category") in {"Entertainment", "Unknown"}
+
+        if prev_label and idle_gap <= _IDLE_GAP_THRESHOLD and not category_jump:
+            ctx = {
+                **session,
+                "context_label": prev_label,
+                "context_source": "inferred",
+                "context_confidence": 0.6,
+            }
+            prev_end_time = session["end_time"]
+            resolved.append(ctx)
+            continue
+
+        # --- UNKNOWN (break condition met, no tag, no category fallback) ---
+        ctx = {
+            **session,
+            "context_label": "UNKNOWN",
+            "context_source": "unknown",
+            "context_confidence": 0.3,
+        }
+        prev_label = None   # break the inheritance chain
+        prev_end_time = session["end_time"]
+        resolved.append(ctx)
+
+    return resolved
+
+
+def compute_context_switches(resolved_sessions: list) -> int:
+    """
+    Count the number of real context switches.
+    A switch requires both sessions to have confidence >= 0.6 and different labels.
+    UNKNOWN sessions are skipped — they are data gaps, not switches.
+    """
+    switches = 0
+    prev = None
+    for session in resolved_sessions:
+        label = session.get("context_label")
+        conf = session.get("context_confidence", 0.0)
+        if label == "UNKNOWN" or conf < 0.6:
+            continue
+        if prev and prev["context_label"] != label:
+            switches += 1
+        prev = session
+    return switches
+
+
+def aggregate_tasks(resolved_sessions: list) -> list:
+    """
+    Group resolved sessions by context_label and sum durations.
+    'Uncategorized' (UNKNOWN sessions) is always last.
+    """
+    buckets: dict = {}
+
+    for session in resolved_sessions:
+        raw_label = session.get("context_label", "UNKNOWN")
+        label = "Uncategorized" if raw_label == "UNKNOWN" else raw_label
+        src = session.get("context_source", "unknown")
+
+        if label not in buckets:
+            buckets[label] = {"total_duration": 0, "session_count": 0, "sources": {}}
+        buckets[label]["total_duration"] += session.get("duration", 0)
+        buckets[label]["session_count"] += 1
+        buckets[label]["sources"][src] = buckets[label]["sources"].get(src, 0) + 1
+
+    # Sort by total_duration descending; Uncategorized always last
+    non_uncategorized = sorted(
+        [{"task_label": k, **v} for k, v in buckets.items() if k != "Uncategorized"],
+        key=lambda x: -x["total_duration"],
+    )
+    result = non_uncategorized
+    if "Uncategorized" in buckets:
+        result = result + [{"task_label": "Uncategorized", **buckets["Uncategorized"]}]
+    return result
