@@ -62,7 +62,7 @@
 <body>
 
 <div id="loading">Loading…</div>
-<div id="error">Could not load session info.</div>
+<div id="error">Could not load session info. <button onclick="doSkip()" style="background:none;border:none;color:#ff6b6b;cursor:pointer;text-decoration:underline;font-size:12px;">Dismiss</button></div>
 
 <div id="popup" style="display:none">
   <div class="header">
@@ -141,12 +141,16 @@
   });
 
   async function doTag(label, source) {
-    await fetch(`${API}/api/tag`, {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({session_id: SESSION_ID, task_label: label, source})
-    });
+    try {
+      await fetch(`${API}/api/tag`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({session_id: SESSION_ID, task_label: label, source})
+      });
+    } catch(e) {}
     window.close();
+    // Fallback for browsers that block window.close() on non-script-opened tabs
+    setTimeout(() => { document.body.innerHTML = '<div style="padding:24px;color:#666;font-size:12px;text-align:center;">Session tagged. You may close this tab.</div>'; }, 200);
   }
 
   async function doSkip() {
@@ -156,6 +160,8 @@
       body: JSON.stringify({session_id: SESSION_ID})
     }).catch(() => {});
     window.close();
+    // Fallback for browsers that block window.close() on non-script-opened tabs
+    setTimeout(() => { document.body.innerHTML = '<div style="padding:24px;color:#666;font-size:12px;text-align:center;">Session skipped. You may close this tab.</div>'; }, 200);
   }
 </script>
 </body>
