@@ -68,7 +68,7 @@ function TodaysTasks({
     )
   }
 
-  const maxDuration = Math.max(...tasks.map(t => t.total_duration), 1)
+  const maxDuration = tasks.reduce((max, t) => Math.max(max, t.total_duration), 1)
 
   return (
     <div style={{ marginBottom: 24 }}>
@@ -166,7 +166,8 @@ export default function DailyOverview({ date, refreshKey }: { date: string; refr
   const summary = useSummary(date, refreshKey)
   const blocks = useTimeline(date, refreshKey)
   const isToday = date === new Date().toISOString().slice(0, 10)
-  const current = isToday ? useCurrentSession(refreshKey) : null  // eslint-disable-line react-hooks/rules-of-hooks
+  const currentSession = useCurrentSession(refreshKey)
+  const current = isToday ? currentSession : null
   const liveElapsed = useLiveDuration(current?.start_time ?? null)
   const [tooltip, setTooltip] = useState<{ text: string; x: number; y: number } | null>(null)
   const tasksData = useTasks(date, refreshKey)
@@ -387,7 +388,7 @@ export default function DailyOverview({ date, refreshKey }: { date: string; refr
               display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8,
               userSelect: 'none',
             }}>
-              <span>▶</span> App Activity (raw)
+              <span style={{ display: 'inline-block', transition: 'transform 0.2s' }} className="details-arrow">▶</span> App Activity (raw)
             </summary>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 12 }}>
               {summary?.top_apps.slice(0, 8).map((app, i) => (

@@ -129,8 +129,9 @@ export default function App() {
 
   useEffect(() => {
     const handler = (e: Event) => {
-      const target = (e as CustomEvent).detail as Page
-      setPage(target)
+      const target = (e as CustomEvent).detail
+      const validPages: Page[] = ['overview', 'sessions', 'trends', 'rules']
+      if (validPages.includes(target)) setPage(target as Page)
     }
     window.addEventListener('focuslog:navigate', handler)
     return () => window.removeEventListener('focuslog:navigate', handler)

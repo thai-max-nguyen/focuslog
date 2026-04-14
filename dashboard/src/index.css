@@ -9,3 +9,7 @@ body { font-family: 'Inter', -apple-system, sans-serif; background: #131313; col
   0%, 100% { opacity: 1; }
   50% { opacity: 0.3; }
 }
+
+details[open] .details-arrow {
+  transform: rotate(90deg);
+}
