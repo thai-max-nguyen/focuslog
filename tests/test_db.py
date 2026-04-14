@@ -138,3 +138,28 @@ def test_insert_skip(db):
     sid = db.insert_session("Jira", "T", "Work", 1700000000, 1700000500, 500, False)
     db.insert_skip(sid)
     # No assertion needed beyond no exception — skip is write-only in Phase 1
+
+
+def test_get_sessions_by_date_with_tags(db):
+    from datetime import datetime, timezone
+    day_start = int(datetime(2024, 1, 15, 0, 0, 0, tzinfo=timezone.utc).timestamp())
+
+    # Tagged session
+    sid1 = db.insert_session("Jira", "Board", "Work", day_start + 3600, day_start + 4200, 600, False)
+    db.upsert_tag(sid1, "NFC review", "user", 0.9)
+    # Untagged session (same day)
+    sid2 = db.insert_session("Figma", "Design", "Work", day_start + 7200, day_start + 7800, 600, False)
+    # Idle session — must be excluded
+    db.insert_session("System", "Idle", "Unknown", day_start + 10800, day_start + 11400, 600, True)
+    # Session on a different day — must be excluded
+    db.insert_session("Chrome", "Other day", "Work", day_start + 90000, day_start + 90600, 600, False)
+
+    results = db.get_sessions_by_date_with_tags("2024-01-15")
+    assert len(results) == 2
+
+    tagged = next(r for r in results if r["id"] == sid1)
+    assert tagged["task_label"] == "NFC review"
+    assert tagged["task_source"] == "user"
+
+    untagged = next(r for r in results if r["id"] == sid2)
+    assert untagged["task_label"] is None
