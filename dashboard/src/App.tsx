@@ -127,6 +127,15 @@ export default function App() {
   const [date, setDate] = useState(format(new Date(), 'yyyy-MM-dd'))
   const { refreshKey, refresh } = useRefreshKey()
 
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const target = (e as CustomEvent).detail as Page
+      setPage(target)
+    }
+    window.addEventListener('focuslog:navigate', handler)
+    return () => window.removeEventListener('focuslog:navigate', handler)
+  }, [])
+
   return (
     <div style={{ display: 'flex', minHeight: '100vh', background: '#131313' }}>
       <Sidebar page={page} onNavigate={setPage} />

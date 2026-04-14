@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { API, type Summary, type Session, type CurrentSession, CATEGORY_COLORS, AppIcon, CategoryIcon, fmtDuration, fmtTime } from '../App'
+import { API, type Summary, type Session, type CurrentSession, type TasksResponse, CATEGORY_COLORS, AppIcon, CategoryIcon, fmtDuration, fmtTime } from '../App'
 
 function useSummary(date: string, refreshKey: number) {
   const [data, setData] = useState<Summary | null>(null)
@@ -23,6 +23,104 @@ function useCurrentSession(refreshKey: number): CurrentSession | null {
     fetch(`${API}/api/current`).then(r => r.json()).then(d => setSession(d || null)).catch(() => setSession(null))
   }, [refreshKey])
   return session
+}
+
+function useTasks(date: string, refreshKey: number) {
+  const [data, setData] = useState<TasksResponse | null>(null)
+  useEffect(() => {
+    fetch(`${API}/api/tasks?date=${date}`)
+      .then(r => r.json())
+      .then(setData)
+      .catch(() => {})
+  }, [date, refreshKey])
+  return data
+}
+
+function TodaysTasks({
+  tasksData,
+  onUncategorizedClick,
+}: {
+  tasksData: TasksResponse | null
+  onUncategorizedClick: () => void
+}) {
+  if (!tasksData) return null
+
+  const { tasks, total_context_switches } = tasksData
+  const totalDuration = tasks.reduce((a, t) => a + t.total_duration, 0)
+  const hasRealTasks = tasks.some(t => t.task_label !== 'Uncategorized')
+
+  // Empty state: nothing tagged, or only Uncategorized
+  if (!hasRealTasks && totalDuration === 0) {
+    return (
+      <div style={{ background: '#1a1a1a', borderRadius: 12, padding: '32px 24px', textAlign: 'center', marginBottom: 24 }}>
+        <div style={{ fontSize: 28, marginBottom: 12 }}>📋</div>
+        <div style={{ color: '#e5e2e1', fontSize: 14, fontWeight: 600, marginBottom: 8 }}>No work context yet for today</div>
+        <div style={{ color: '#666', fontSize: 12, marginBottom: 20, lineHeight: 1.6 }}>
+          Tag a few sessions to unlock your<br />daily work breakdown.
+        </div>
+        <button
+          onClick={onUncategorizedClick}
+          style={{ background: '#1e2a3a', color: '#4f86f7', border: '1px solid #2a3a5a', borderRadius: 8, padding: '8px 18px', fontSize: 12, cursor: 'pointer' }}
+        >
+          View Sessions →
+        </button>
+      </div>
+    )
+  }
+
+  const maxDuration = Math.max(...tasks.map(t => t.total_duration), 1)
+
+  return (
+    <div style={{ marginBottom: 24 }}>
+      <div style={{ fontSize: 11, color: '#555', letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: 14 }}>
+        Today's Work
+      </div>
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 12 }}>
+        {tasks.map(task => {
+          const isUncategorized = task.task_label === 'Uncategorized'
+          const barWidth = `${Math.round((task.total_duration / maxDuration) * 100)}%`
+          const barColor = isUncategorized ? '#2a2a2a' : '#4f86f7'
+          const textColor = isUncategorized ? '#555' : '#e5e2e1'
+
+          return (
+            <div
+              key={task.task_label}
+              onClick={isUncategorized ? onUncategorizedClick : undefined}
+              style={{ cursor: isUncategorized ? 'pointer' : 'default' }}
+              title={isUncategorized ? 'Tag a few sessions to see your work breakdown' : undefined}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                <span style={{ fontSize: 13, color: textColor, fontWeight: isUncategorized ? 400 : 500 }}>
+                  {isUncategorized ? '❓ Uncategorized' : task.task_label}
+                  {isUncategorized && (
+                    <span style={{ fontSize: 10, color: '#555', marginLeft: 6 }}>
+                      — tag to classify
+                    </span>
+                  )}
+                </span>
+                <span style={{ fontSize: 12, color: isUncategorized ? '#444' : '#aaa', fontVariantNumeric: 'tabular-nums' }}>
+                  {fmtDuration(task.total_duration)}
+                </span>
+              </div>
+              <div style={{ height: 4, background: '#1a1a1a', borderRadius: 2 }}>
+                <div style={{ height: 4, width: barWidth, background: barColor, borderRadius: 2, transition: 'width 0.4s ease' }} />
+              </div>
+            </div>
+          )
+        })}
+      </div>
+
+      {total_context_switches > 0 && (
+        <button
+          onClick={onUncategorizedClick}
+          style={{ background: 'none', border: 'none', color: '#555', fontSize: 11, cursor: 'pointer', padding: 0, textDecoration: 'underline' }}
+        >
+          Context switches today: {total_context_switches}
+        </button>
+      )}
+    </div>
+  )
 }
 
 /** Live-ticking duration starting from a Unix timestamp. Updates every second. */
@@ -71,6 +169,10 @@ export default function DailyOverview({ date, refreshKey }: { date: string; refr
   const current = isToday ? useCurrentSession(refreshKey) : null  // eslint-disable-line react-hooks/rules-of-hooks
   const liveElapsed = useLiveDuration(current?.start_time ?? null)
   const [tooltip, setTooltip] = useState<{ text: string; x: number; y: number } | null>(null)
+  const tasksData = useTasks(date, refreshKey)
+  const navigateToSessions = () => {
+    window.dispatchEvent(new CustomEvent('focuslog:navigate', { detail: 'sessions' }))
+  }
   const DAY = 86400
 
   // Anchor timeline to local midnight of the selected date
@@ -272,40 +374,31 @@ export default function DailyOverview({ date, refreshKey }: { date: string; refr
           )}
         </div>
 
-        {/* Right: App Hierarchy */}
-        <div style={{ background: '#201f1f', borderRadius: 12, padding: '24px 20px' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-            <span style={{ fontSize: 13, fontWeight: 600, color: '#e5e2e1' }}>App Hierarchy</span>
-            <span style={{ fontSize: 10, color: '#555', letterSpacing: '0.08em' }}>USAGE INTENSITY</span>
-          </div>
-          {(summary?.top_apps ?? []).slice(0, 8).map((app, i) => {
-            const maxDur = summary!.top_apps[0]?.duration ?? 1
-            const pct = (app.duration / maxDur) * 100
-            const cat = Object.entries(summary?.categories ?? {}).length > 0
-              ? undefined  // category not in top_apps, color by rank
-              : undefined
-            void cat
-            return (
-              <div key={app.app_name} style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 16 }}>
-                <span style={{ fontSize: 11, color: '#555', width: 20, flexShrink: 0, fontVariantNumeric: 'tabular-nums' }}>
-                  {String(i + 1).padStart(2, '0')}
-                </span>
-                <AppIcon name={app.app_name} />
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 5 }}>
-                    <span style={{ fontSize: 13, color: '#e5e2e1', fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{app.app_name}</span>
-                    <span style={{ fontSize: 12, color: '#6b6b6b', flexShrink: 0, marginLeft: 8 }}>{fmtDuration(app.duration)}</span>
-                  </div>
-                  <div style={{ height: 3, background: '#131313', borderRadius: 2 }}>
-                    <div style={{ height: '100%', width: `${pct}%`, background: '#568dfe', borderRadius: 2, transition: 'width 0.6s ease' }} />
-                  </div>
+        {/* Right: Today's Work + App Activity */}
+        <div>
+          {/* Today's Work — context-first primary block */}
+          <TodaysTasks tasksData={tasksData} onUncategorizedClick={navigateToSessions} />
+
+          {/* App Activity (raw) — collapsible secondary */}
+          <details style={{ marginBottom: 24 }}>
+            <summary style={{
+              fontSize: 11, color: '#555', letterSpacing: '0.1em',
+              textTransform: 'uppercase', cursor: 'pointer', listStyle: 'none',
+              display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8,
+              userSelect: 'none',
+            }}>
+              <span>▶</span> App Activity (raw)
+            </summary>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 12 }}>
+              {summary?.top_apps.slice(0, 8).map((app, i) => (
+                <div key={app.app_name} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <span style={{ fontSize: 11, color: '#444', width: 16, textAlign: 'right' }}>{i + 1}</span>
+                  <span style={{ fontSize: 12, color: '#888', flex: 1 }}>{app.app_name}</span>
+                  <span style={{ fontSize: 12, color: '#555', fontVariantNumeric: 'tabular-nums' }}>{fmtDuration(app.duration)}</span>
                 </div>
-              </div>
-            )
-          })}
-          {(summary?.top_apps ?? []).length === 0 && (
-            <div style={{ color: '#555', textAlign: 'center', padding: '40px 0', fontSize: 13 }}>No activity recorded for this day</div>
-          )}
+              ))}
+            </div>
+          </details>
         </div>
       </div>
     </div>
