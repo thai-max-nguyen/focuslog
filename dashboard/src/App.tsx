@@ -33,6 +33,26 @@ export type Summary = {
   focus_efficiency: number; worst_distraction_app: string
 }
 
+export type ContextSource = 'user' | 'suggested' | 'inferred' | 'inferred_category' | 'unknown'
+
+export type SessionWithTag = Session & {
+  task_label?: string | null
+  task_source?: ContextSource | null
+  task_confidence?: number | null
+}
+
+export type TaskSummary = {
+  task_label: string
+  total_duration: number
+  session_count: number
+  sources: Partial<Record<ContextSource, number>>
+}
+
+export type TasksResponse = {
+  tasks: TaskSummary[]
+  total_context_switches: number
+}
+
 const APP_ICON_COLORS = ['#4f86f7', '#f7c948', '#4ecdc4', '#ff6b6b', '#b0c6ff', '#568dfe']
 
 export const CATEGORY_COLORS: Record<string, string> = {
