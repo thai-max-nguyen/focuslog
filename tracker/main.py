@@ -15,6 +15,7 @@ import uvicorn
 from tracker.api import create_app
 from tracker.classifier import Classifier, DEFAULT_RULES
 from tracker.db import Database
+from tracker.tagger import is_system_app
 from tracker.watcher import WindowWatcher
 
 DATA_DIR = os.path.expanduser("~/Library/Application Support/focuslog")
@@ -118,6 +119,11 @@ class FocusLogApp(rumps.App):
 
     def _on_session_end(self, app_name, window_title, url, start_time, end_time, duration, is_idle):
         resolved_name = self.classifier.resolve_app_name(app_name, window_title, url)
+
+        # Drop system-level processes — not real user activity
+        if is_system_app(resolved_name):
+            return
+
         category = self.classifier.classify(resolved_name, window_title)
         self.db.insert_session(
             app_name=resolved_name,
